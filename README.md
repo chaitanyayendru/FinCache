@@ -54,10 +54,12 @@
    redis-server
    ```
 
-3. Run the server:
-   ```bash
-   ./gradlew bootRun
-   ```
+3. Run the Server using Maven
+
+  ```bash
+  mvn clean install
+  mvn spring-boot:run
+  ```
 
 4. Interact using CLI:
    ```bash
