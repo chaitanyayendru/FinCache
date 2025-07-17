@@ -11,13 +11,14 @@ import (
 )
 
 type Store struct {
-	mu     sync.RWMutex
-	data   map[string]*Item
-	ttl    map[string]time.Time
-	config config.StoreConfig
-	logger *zap.Logger
-	ctx    context.Context
-	cancel context.CancelFunc
+	mu         sync.RWMutex
+	data       map[string]*Item
+	ttl        map[string]time.Time
+	sortedSets map[string]*SortedSet
+	config     config.StoreConfig
+	logger     *zap.Logger
+	ctx        context.Context
+	cancel     context.CancelFunc
 }
 
 type Item struct {
@@ -42,11 +43,12 @@ func NewStore(cfg config.StoreConfig) *Store {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	store := &Store{
-		data:   make(map[string]*Item),
-		ttl:    make(map[string]time.Time),
-		config: cfg,
-		ctx:    ctx,
-		cancel: cancel,
+		data:       make(map[string]*Item),
+		ttl:        make(map[string]time.Time),
+		sortedSets: make(map[string]*SortedSet),
+		config:     cfg,
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 
 	// Start TTL cleanup goroutine if enabled
@@ -290,6 +292,140 @@ func (s *Store) SaveSnapshot() error {
 func (s *Store) LoadSnapshot() error {
 	// Load from file (implement file I/O)
 	return nil
+}
+
+// Sorted Set Methods
+func (s *Store) ZAdd(key string, score float64, member string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.sortedSets[key]; !exists {
+		s.sortedSets[key] = NewSortedSet()
+	}
+
+	return s.sortedSets[key].ZAdd(key, score, member)
+}
+
+func (s *Store) ZRem(key string, members ...string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if sortedSet, exists := s.sortedSets[key]; exists {
+		return sortedSet.ZRem(key, members...)
+	}
+	return 0
+}
+
+func (s *Store) ZScore(key string, member string) (float64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if sortedSet, exists := s.sortedSets[key]; exists {
+		return sortedSet.ZScore(key, member)
+	}
+	return 0, false
+}
+
+func (s *Store) ZRank(key string, member string) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if sortedSet, exists := s.sortedSets[key]; exists {
+		return sortedSet.ZRank(key, member)
+	}
+	return -1
+}
+
+func (s *Store) ZRevRank(key string, member string) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if sortedSet, exists := s.sortedSets[key]; exists {
+		return sortedSet.ZRevRank(key, member)
+	}
+	return -1
+}
+
+func (s *Store) ZRange(key string, start, stop int) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if sortedSet, exists := s.sortedSets[key]; exists {
+		return sortedSet.ZRange(key, start, stop)
+	}
+	return []string{}
+}
+
+func (s *Store) ZRevRange(key string, start, stop int) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if sortedSet, exists := s.sortedSets[key]; exists {
+		return sortedSet.ZRevRange(key, start, stop)
+	}
+	return []string{}
+}
+
+func (s *Store) ZCard(key string) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if sortedSet, exists := s.sortedSets[key]; exists {
+		return sortedSet.ZCard(key)
+	}
+	return 0
+}
+
+func (s *Store) ZIncrBy(key string, increment float64, member string) float64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.sortedSets[key]; !exists {
+		s.sortedSets[key] = NewSortedSet()
+	}
+
+	return s.sortedSets[key].ZIncrBy(key, increment, member)
+}
+
+// Order Book specific methods
+func (s *Store) GetOrderBook(key string, depth int) ([]*SortedSetMember, []*SortedSetMember) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if sortedSet, exists := s.sortedSets[key]; exists {
+		return sortedSet.GetOrderBook(depth)
+	}
+	return []*SortedSetMember{}, []*SortedSetMember{}
+}
+
+func (s *Store) GetBestBid(key string) (*SortedSetMember, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if sortedSet, exists := s.sortedSets[key]; exists {
+		return sortedSet.GetBestBid()
+	}
+	return nil, false
+}
+
+func (s *Store) GetBestAsk(key string) (*SortedSetMember, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if sortedSet, exists := s.sortedSets[key]; exists {
+		return sortedSet.GetBestAsk()
+	}
+	return nil, false
+}
+
+func (s *Store) GetSpread(key string) (float64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if sortedSet, exists := s.sortedSets[key]; exists {
+		return sortedSet.GetSpread()
+	}
+	return 0, false
 }
 
 func (s *Store) Close() error {
